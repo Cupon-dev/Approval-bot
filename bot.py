@@ -20,14 +20,13 @@ CHANNEL_USERNAMES = os.getenv('CHANNEL_USERNAMES', '').split(',')
 CHANNEL_USERNAMES = [username.strip().replace('@', '') for username in CHANNEL_USERNAMES if username.strip()]
 
 # Suspicious criteria
-MIN_ACCOUNT_AGE_DAYS = 30  # Minimum account age in days
+MIN_ACCOUNT_AGE_DAYS = 30
 SUSPICIOUS_NAMES = ["deleted account", "bot", "bots", "police", "telegram", "admin", "support", 
                     "official", "http", "www", ".com", ".ru", ".xyz", "click", "promo", "sales"]
 
 # File to store left users
 LEFT_USERS_FILE = "left_users.json"
 
-# Load left users from file
 def load_left_users():
     if os.path.exists(LEFT_USERS_FILE):
         try:
@@ -37,53 +36,43 @@ def load_left_users():
             return {}
     return {}
 
-# Save left users to file
 def save_left_users(data):
     with open(LEFT_USERS_FILE, 'w') as f:
         json.dump(data, f)
 
-# Initialize left_users
 left_users = load_left_users()
 
 def is_suspicious_user(user):
-    """Check if a user might be a bot or suspicious account"""
-    # Check account age (approximate)
     if hasattr(user, 'created_at') and user.created_at:
         account_age_days = (datetime.now() - user.created_at).days
         if account_age_days < MIN_ACCOUNT_AGE_DAYS:
             return True, f"Account too new ({account_age_days} days)"
     
-    # Check if username contains suspicious keywords
     if user.username:
         username_lower = user.username.lower()
         for keyword in SUSPICIOUS_NAMES:
             if keyword in username_lower:
                 return True, f"Suspicious username: {user.username}"
     
-    # Check if first name contains suspicious keywords
     if user.first_name:
         first_name_lower = user.first_name.lower()
         for keyword in SUSPICIOUS_NAMES:
             if keyword in first_name_lower:
                 return True, f"Suspicious first name: {user.first_name}"
     
-    # Check if last name contains suspicious keywords
     if user.last_name:
         last_name_lower = user.last_name.lower()
         for keyword in SUSPICIOUS_NAMES:
             if keyword in last_name_lower:
                 return True, f"Suspicious last name: {user.last_name}"
     
-    # Check if user has no username
     if not user.username:
         return True, "No username"
     
     return False, "User appears legitimate"
 
 def track_chat_members(update: Update, context: CallbackContext):
-    """Track when users leave any of the monitored channels"""
     global left_users
-    
     if update.chat_member:
         chat_username = update.effective_chat.username
         if chat_username not in CHANNEL_USERNAMES:
@@ -92,7 +81,6 @@ def track_chat_members(update: Update, context: CallbackContext):
         old_status = update.chat_member.old_chat_member.status
         new_status = update.chat_member.new_chat_member.status
         
-        # Check if user left the channel
         if (old_status in ['member', 'administrator', 'creator'] and 
             new_status in ['left', 'kicked']):
             user_id = str(update.chat_member.new_chat_member.user.id)
@@ -107,9 +95,7 @@ def track_chat_members(update: Update, context: CallbackContext):
             logger.info(f"User {user_id} left channel {chat_username}, added to manual approval list")
 
 def approve_all_pending(context: CallbackContext):
-    """Function to approve all pending join requests for all channels"""
     global left_users
-    
     try:
         job_data = context.job.context
         chat_id = job_data.get('chat_id')
@@ -126,7 +112,6 @@ def approve_all_pending(context: CallbackContext):
                 continue
                 
             try:
-                # Get pending join requests for this channel
                 result = context.bot.get_chat_join_requests(channel_username)
                 pending_requests = [] if not result else result
                 
@@ -136,23 +121,19 @@ def approve_all_pending(context: CallbackContext):
                 for request in pending_requests:
                     user = request.from_user
                     
-                    # Check if user previously left this channel
                     if str(user.id) in left_users and channel_username in left_users[str(user.id)]:
                         context.bot.decline_chat_join_request(channel_username, user.id)
                         logger.info(f"Declined user {user.username or user.first_name} (previously left {channel_username})")
                         rejected_count += 1
                         continue
                     
-                    # Check if user is suspicious
                     is_suspicious, reason = is_suspicious_user(user)
                     
                     if not is_suspicious:
-                        # Approve the request
                         context.bot.approve_chat_join_request(channel_username, user.id)
                         logger.info(f"Approved user: {user.username or user.first_name} for {channel_username}")
                         approved_count += 1
                     else:
-                        # Decline the request if suspicious
                         context.bot.decline_chat_join_request(channel_username, user.id)
                         logger.warning(f"Declined suspicious user: {user.username or user.first_name} for {channel_username} - Reason: {reason}")
                         rejected_count += 1
@@ -161,7 +142,6 @@ def approve_all_pending(context: CallbackContext):
                 total_approved += approved_count
                 total_rejected += rejected_count
                 
-                # Add delay between channels to avoid rate limiting
                 time.sleep(1)
                 
             except Exception as e:
@@ -169,7 +149,6 @@ def approve_all_pending(context: CallbackContext):
                 logger.error(error_msg)
                 results.append(error_msg)
         
-        # Send report if in a chat
         if chat_id:
             summary = f"Approval process completed!\nTotal Approved: {total_approved}\nTotal Rejected: {total_rejected}\n\n" + "\n".join(results)
             context.bot.send_message(chat_id, summary)
@@ -182,9 +161,7 @@ def approve_all_pending(context: CallbackContext):
                 context.bot.send_message(chat_id, f"Error processing join requests: {e}")
 
 def start_approval(update: Update, context: CallbackContext):
-    """Command to start the approval process for all or specific channel"""
     if update.effective_chat.type in ['group', 'supergroup', 'channel']:
-        # Check if user is admin
         try:
             member = context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)
             if member.status not in ['administrator', 'creator']:
@@ -194,7 +171,6 @@ def start_approval(update: Update, context: CallbackContext):
             update.message.reply_text("Error verifying admin status.")
             return
         
-        # Check if a specific channel was mentioned
         specific_channel = None
         if context.args:
             channel_arg = context.args[0].replace('@', '')
@@ -207,7 +183,6 @@ def start_approval(update: Update, context: CallbackContext):
         else:
             update.message.reply_text("Starting approval process for all channels...")
         
-        # Run approval process with job context to send report
         context.job_queue.run_once(
             approve_all_pending, 
             when=1, 
@@ -217,11 +192,8 @@ def start_approval(update: Update, context: CallbackContext):
         update.message.reply_text("This command can only be used in group/channel chats.")
 
 def manual_approve(update: Update, context: CallbackContext):
-    """Manually approve a user who previously left"""
     global left_users
-    
     if update.effective_chat.type in ['group', 'supergroup', 'channel']:
-        # Check if user is admin
         try:
             member = context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)
             if member.status not in ['administrator', 'creator']:
@@ -231,7 +203,6 @@ def manual_approve(update: Update, context: CallbackContext):
             update.message.reply_text("Error verifying admin status.")
             return
         
-        # Check if user ID was provided
         if not context.args or len(context.args) < 1:
             update.message.reply_text("Please provide a user ID to approve. Usage: /approve_user <user_id> [channel]")
             return
@@ -240,7 +211,6 @@ def manual_approve(update: Update, context: CallbackContext):
             user_id = str(context.args[0])
             channel_username = context.args[1].replace('@', '') if len(context.args) > 1 else None
             
-            # If no channel specified, approve for all channels
             channels_to_approve = [channel_username] if channel_username else CHANNEL_USERNAMES
             
             approved_channels = []
@@ -248,14 +218,12 @@ def manual_approve(update: Update, context: CallbackContext):
                 if channel not in CHANNEL_USERNAMES:
                     continue
                 
-                # Remove from left users list for this channel
                 if user_id in left_users and channel in left_users[user_id]:
                     left_users[user_id].remove(channel)
                     if not left_users[user_id]:
                         del left_users[user_id]
                     save_left_users(left_users)
                 
-                # Approve the user for this channel
                 context.bot.approve_chat_join_request(channel, int(user_id))
                 logger.info(f"Manually approved user {user_id} for {channel}")
                 approved_channels.append(channel)
@@ -274,11 +242,8 @@ def manual_approve(update: Update, context: CallbackContext):
         update.message.reply_text("This command can only be used in group/channel chats.")
 
 def list_left_users(update: Update, context: CallbackContext):
-    """List users who left and need manual approval"""
     global left_users
-    
     if update.effective_chat.type in ['group', 'supergroup', 'channel']:
-        # Check if user is admin
         try:
             member = context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)
             if member.status not in ['administrator', 'creator']:
@@ -295,7 +260,6 @@ def list_left_users(update: Update, context: CallbackContext):
             for user_id, channels in left_users.items():
                 message += f"User ID: {user_id}\nChannels: {', '.join([f'@{c}' for c in channels])}\n\n"
             
-            # Telegram has a message length limit, so we might need to split
             if len(message) > 4096:
                 parts = [message[i:i+4096] for i in range(0, len(message), 4096)]
                 for part in parts:
@@ -306,7 +270,6 @@ def list_left_users(update: Update, context: CallbackContext):
         update.message.reply_text("This command can only be used in group/channel chats.")
 
 def list_channels(update: Update, context: CallbackContext):
-    """List all channels monitored by the bot"""
     if not CHANNEL_USERNAMES:
         update.message.reply_text("No channels are being monitored.")
     else:
@@ -314,13 +277,12 @@ def list_channels(update: Update, context: CallbackContext):
         update.message.reply_text(f"Channels monitored by this bot:\n{channels_list}")
 
 def start(update: Update, context: CallbackContext):
-    """Send a message when the command /start is issued."""
     help_text = """
 Hi! I am a multi-channel approval bot.
 
 Commands:
-/approve_all [channel] - Process all pending join requests (optionally for a specific channel)
-/approve_user <user_id> [channel] - Manually approve a user who previously left
+/approve_all [channel] - Process all pending join requests
+/approve_user <user_id> [channel] - Manually approve a user
 /list_left_users - List users requiring manual approval
 /list_channels - List all monitored channels
 /help - Show this help message
@@ -328,16 +290,12 @@ Commands:
     update.message.reply_text(help_text)
 
 def help_command(update: Update, context: CallbackContext):
-    """Send a help message when the command /help is issued."""
     start(update, context)
 
 def error(update: Update, context: CallbackContext):
-    """Log Errors caused by Updates."""
     logger.warning('Update "%s" caused error "%s"', update, context.error)
 
 def main():
-    """Start the bot."""
-    # Check if token is available
     if not TOKEN:
         logger.error("TELEGRAM_BOT_TOKEN environment variable is required!")
         return
@@ -348,13 +306,9 @@ def main():
     
     logger.info(f"Monitoring channels: {', '.join(CHANNEL_USERNAMES)}")
     
-    # Create the Updater and pass it your bot's token.
     updater = Updater(TOKEN)
-
-    # Get the dispatcher to register handlers
     dispatcher = updater.dispatcher
 
-    # Register command handlers
     dispatcher.add_handler(CommandHandler("start", start))
     dispatcher.add_handler(CommandHandler("help", help_command))
     dispatcher.add_handler(CommandHandler("approve_all", start_approval))
@@ -362,17 +316,11 @@ def main():
     dispatcher.add_handler(CommandHandler("list_left_users", list_left_users))
     dispatcher.add_handler(CommandHandler("list_channels", list_channels))
     
-    # Track when users leave the channels
     dispatcher.add_handler(ChatMemberHandler(track_chat_members))
-    
-    # Log all errors
     dispatcher.add_error_handler(error)
 
-    # Start the Bot
     updater.start_polling()
     logger.info("Bot started and polling for updates...")
-    
-    # Run the bot until interrupted
     updater.idle()
 
 if __name__ == '__main__':
