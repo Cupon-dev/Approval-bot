@@ -2,16 +2,27 @@ import os
 import logging
 import json
 import sys
-from telegram import Update
-from telegram.ext import Updater, CommandHandler, CallbackContext, ChatMemberHandler
-from datetime import datetime
-import time
+
+# Check for required dependencies first
+try:
+    from telegram import Update
+    from telegram.ext import Updater, CommandHandler, CallbackContext, ChatMemberHandler
+    from datetime import datetime
+    import time
+    import urllib3
+except ImportError as e:
+    print(f"❌ Missing dependency: {e}")
+    print("Please make sure requirements.txt includes:")
+    print("- python-telegram-bot==13.7")
+    print("- python-dotenv==0.19.0") 
+    print("- urllib3==1.26.18")
+    sys.exit(1)
 
 # Enable logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
     level=logging.INFO,
-    stream=sys.stdout  # Ensure logs go to stdout for Railway
+    stream=sys.stdout
 )
 logger = logging.getLogger(__name__)
 
@@ -54,7 +65,8 @@ def check_environment():
         logger.error("CHANNEL_IDS is empty or not properly formatted")
         return False
     
-    logger.info(f"Monitoring channels with IDs: {CHANNEL_IDS}")
+    logger.info(f"✅ Environment variables check passed")
+    logger.info(f"📊 Monitoring {len(CHANNEL_IDS)} channels")
     return True
 
 def load_left_users():
@@ -385,37 +397,45 @@ def error(update: Update, context: CallbackContext):
 
 def main():
     """Start the bot."""
+    logger.info("🤖 Starting Telegram Approval Bot...")
+    
     # Check environment first
     if not check_environment():
         logger.error("Bot cannot start due to missing environment variables")
         return
     
-    # Create the Updater and pass it your bot's token.
-    updater = Updater(TOKEN)
+    try:
+        # Create the Updater and pass it your bot's token.
+        updater = Updater(TOKEN)
 
-    # Get the dispatcher to register handlers
-    dispatcher = updater.dispatcher
+        # Get the dispatcher to register handlers
+        dispatcher = updater.dispatcher
 
-    # Register command handlers
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("help", help_command))
-    dispatcher.add_handler(CommandHandler("approve_all", start_approval))
-    dispatcher.add_handler(CommandHandler("approve_user", manual_approve))
-    dispatcher.add_handler(CommandHandler("list_left_users", list_left_users))
-    dispatcher.add_handler(CommandHandler("list_channels", list_channels))
-    
-    # Track when users leave the channels
-    dispatcher.add_handler(ChatMemberHandler(track_chat_members))
-    
-    # Log all errors
-    dispatcher.add_error_handler(error)
+        # Register command handlers
+        dispatcher.add_handler(CommandHandler("start", start))
+        dispatcher.add_handler(CommandHandler("help", help_command))
+        dispatcher.add_handler(CommandHandler("approve_all", start_approval))
+        dispatcher.add_handler(CommandHandler("approve_user", manual_approve))
+        dispatcher.add_handler(CommandHandler("list_left_users", list_left_users))
+        dispatcher.add_handler(CommandHandler("list_channels", list_channels))
+        
+        # Track when users leave the channels
+        dispatcher.add_handler(ChatMemberHandler(track_chat_members))
+        
+        # Log all errors
+        dispatcher.add_error_handler(error)
 
-    # Start the Bot
-    updater.start_polling()
-    logger.info("Bot started and polling for updates...")
-    
-    # Run the bot until interrupted
-    updater.idle()
+        # Start the Bot
+        updater.start_polling()
+        logger.info("✅ Bot started successfully and polling for updates...")
+        logger.info(f"📊 Monitoring {len(CHANNEL_IDS)} channels")
+        
+        # Run the bot until interrupted
+        updater.idle()
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to start bot: {e}")
+        logger.error("Please check your TELEGRAM_BOT_TOKEN environment variable")
 
 if __name__ == '__main__':
     main()
